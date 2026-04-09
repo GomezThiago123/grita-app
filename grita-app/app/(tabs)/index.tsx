@@ -153,6 +153,7 @@ export default function App() {
       ])
     ).start();
 
+    
     intervalRef.current = setInterval(async () => {
       if (!recordingRef.current) return;
 
