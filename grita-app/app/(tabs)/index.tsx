@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -20,15 +20,25 @@ const FRASES = [
   "¿valió la pena tanto grito para un final tranquilo?"
 ];
 
+const FINAL_FUERTE =
+  "Gritaste tan fuerte que ya no quedaba nada adentro.\nA veces hay que soltar todo el odio para poder soltarlo.";
+
+const FINAL_MODERADO =
+  "A veces alcanza con soltar un poco.\nNo hace falta gritar todo el odio para vivir sin él.";
+
 export default function App() {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isStartingRef = useRef<boolean>(false);
+  const fraseIndexRef = useRef(0);
+  const gritoMaxRef = useRef(-160);
+  const ecoSoundRef = useRef<Audio.Sound | null>(null);
 
   const [grabando, setGrabando] = useState(false);
   const [liberado, setLiberado] = useState(false);
   const [fraseIndex, setFraseIndex] = useState(0);
   const [color, setColor] = useState("#ffffff");
+  const [mensajeFinal, setMensajeFinal] = useState(FINAL_MODERADO);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -46,6 +56,32 @@ export default function App() {
       }
     } catch {}
     recordingRef.current = null;
+  };
+
+  const reproducirEco = async (uri: string) => {
+    try {
+      if (ecoSoundRef.current) {
+        await ecoSoundRef.current.unloadAsync();
+        ecoSoundRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true, volume: 0.7 }
+      );
+
+      ecoSoundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync();
+        }
+      });
+    } catch {}
   };
 
   const animarTexto = () => {
@@ -89,10 +125,16 @@ export default function App() {
 
       setFraseIndex((prev) => {
         const next = prev + 1;
+        fraseIndexRef.current = next;
 
         if (next >= FRASES.length) {
           if (intervalRef.current) clearInterval(intervalRef.current);
+
+          const uri = recordingRef.current?.getURI() ?? null;
           detener();
+
+          setMensajeFinal(gritoMaxRef.current > -8 ? FINAL_FUERTE : FINAL_MODERADO);
+          if (uri) reproducirEco(uri);
 
           Vibration.vibrate([200, 100, 200]);
 
@@ -141,6 +183,8 @@ export default function App() {
     setGrabando(true);
     setLiberado(false);
     setFraseIndex(0);
+    fraseIndexRef.current = 0;
+    gritoMaxRef.current = -160;
 
     let ultimoVolumen = -160;
     let umbralActual = -25;
@@ -163,13 +207,15 @@ export default function App() {
       const vol = status.metering ?? -160;
       const cambio = vol - ultimoVolumen;
 
+      gritoMaxRef.current = Math.max(gritoMaxRef.current, vol);
+
       if (vol < -40) setColor("#888");
       else if (vol < -25) setColor("#ffffff");
       else if (vol < -15) setColor("#ffd54f");
       else setColor("#ff3b3b");
 
       if (vol > umbralActual && cambio > 6) {
-        if (fraseIndex < FRASES.length - 2) {
+        if (fraseIndexRef.current < FRASES.length - 2) {
           umbralActual += 4;
         } else {
           umbralActual = Math.min(umbralActual, -10);
@@ -178,7 +224,7 @@ export default function App() {
         avanzar();
         tiempoUltimaFrase = 0;
       } else {
-        if (fraseIndex === FRASES.length - 1) {
+        if (fraseIndexRef.current === FRASES.length - 1) {
           tiempoUltimaFrase += 80;
 
           if (tiempoUltimaFrase > 1500) {
@@ -197,13 +243,28 @@ export default function App() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     await detener();
 
+    if (ecoSoundRef.current) {
+      await ecoSoundRef.current.unloadAsync();
+      ecoSoundRef.current = null;
+    }
+
     setFraseIndex(0);
+    fraseIndexRef.current = 0;
+    gritoMaxRef.current = -160;
     setGrabando(false);
     setLiberado(false);
     setColor("#ffffff");
 
     shakeX.setValue(0);
   };
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      detener();
+      if (ecoSoundRef.current) ecoSoundRef.current.unloadAsync();
+    };
+  }, []);
 
   return (
     <Animated.View style={[styles.container, { transform: [{ translateX: shakeX }] }]}>
@@ -265,10 +326,7 @@ export default function App() {
 
       {liberado && (
         <View style={styles.center}>
-          <Text style={styles.final}>
-            A veces es mejor no gritar{"\n"}
-            y vivir la vida sin odio
-          </Text>
+          <Text style={styles.final}>{mensajeFinal}</Text>
 
           <Pressable style={styles.button} onPress={reiniciar}>
             <Text style={styles.buttonText}>VOLVER</Text>
