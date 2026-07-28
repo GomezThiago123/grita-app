@@ -9,6 +9,7 @@ import {
   Dimensions,
 } from "react-native";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system";
 
 const { width } = Dimensions.get("window");
 
@@ -17,8 +18,9 @@ const FRASES = [
   "seguí gritando",
   "continuá",
   "llegaste al máximo",
-  "¿valió la pena tanto grito para un final tranquilo?"
 ];
+
+const PREGUNTA_FINAL = "¿valió la pena tanto grito para un final tranquilo?";
 
 const FINAL_FUERTE =
   "Gritaste tan fuerte que ya no quedaba nada adentro.\nA veces hay que soltar todo el odio para poder soltarlo.";
@@ -32,7 +34,6 @@ export default function App() {
   const isStartingRef = useRef<boolean>(false);
   const fraseIndexRef = useRef(0);
   const gritoMaxRef = useRef(-160);
-  const ecoSoundRef = useRef<Audio.Sound | null>(null);
 
   const [grabando, setGrabando] = useState(false);
   const [liberado, setLiberado] = useState(false);
@@ -53,35 +54,13 @@ export default function App() {
         if (status.isRecording) {
           await recordingRef.current.stopAndUnloadAsync();
         }
+        const uri = recordingRef.current.getURI();
+        if (uri) {
+          FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        }
       }
     } catch {}
     recordingRef.current = null;
-  };
-
-  const reproducirEco = async (uri: string) => {
-    try {
-      if (ecoSoundRef.current) {
-        await ecoSoundRef.current.unloadAsync();
-        ecoSoundRef.current = null;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: true, volume: 0.7 }
-      );
-
-      ecoSoundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
-    } catch {}
   };
 
   const animarTexto = () => {
@@ -130,11 +109,9 @@ export default function App() {
         if (next >= FRASES.length) {
           if (intervalRef.current) clearInterval(intervalRef.current);
 
-          const uri = recordingRef.current?.getURI() ?? null;
           detener();
 
           setMensajeFinal(gritoMaxRef.current > -8 ? FINAL_FUERTE : FINAL_MODERADO);
-          if (uri) reproducirEco(uri);
 
           Vibration.vibrate([200, 100, 200]);
 
@@ -215,11 +192,7 @@ export default function App() {
       else setColor("#ff3b3b");
 
       if (vol > umbralActual && cambio > 6) {
-        if (fraseIndexRef.current < FRASES.length - 2) {
-          umbralActual += 4;
-        } else {
-          umbralActual = Math.min(umbralActual, -10);
-        }
+        umbralActual = Math.min(umbralActual + 7, -5);
 
         avanzar();
         tiempoUltimaFrase = 0;
@@ -243,11 +216,6 @@ export default function App() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     await detener();
 
-    if (ecoSoundRef.current) {
-      await ecoSoundRef.current.unloadAsync();
-      ecoSoundRef.current = null;
-    }
-
     setFraseIndex(0);
     fraseIndexRef.current = 0;
     gritoMaxRef.current = -160;
@@ -262,7 +230,6 @@ export default function App() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       detener();
-      if (ecoSoundRef.current) ecoSoundRef.current.unloadAsync();
     };
   }, []);
 
@@ -326,6 +293,7 @@ export default function App() {
 
       {liberado && (
         <View style={styles.center}>
+          <Text style={styles.pregunta}>{PREGUNTA_FINAL}</Text>
           <Text style={styles.final}>{mensajeFinal}</Text>
 
           <Pressable style={styles.button} onPress={reiniciar}>
@@ -404,6 +372,15 @@ const styles = StyleSheet.create({
 
   resetText: {
     color: "#fff",
+  },
+
+  pregunta: {
+    fontSize: 20,
+    color: "#ff4d4d",
+    fontWeight: "bold",
+    textAlign: "center",
+    paddingHorizontal: 20,
+    marginBottom: 16,
   },
 
   final: {
