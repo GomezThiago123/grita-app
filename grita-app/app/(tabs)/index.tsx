@@ -18,9 +18,12 @@ const FRASES = ["gritá", "más fuerte", "todavía más", "soltalo todo"];
 // Tiempo máximo para gritar. Si se termina, el animal se decide con lo que hubo.
 const TIEMPO_LIMITE = 10000;
 const INTERVALO = 80;
+// Cuántas muestras seguidas tiene que mantenerse el grito para contar (~400 ms).
+// Así un golpe o una tos no cuentan como un grito fuerte.
+const MUESTRAS_SOSTENIDAS = 5;
 
 type Animal = {
-  minDb: number; // pico mínimo de volumen (dB) para ser este animal
+  minDb: number; // volumen sostenido mínimo (dB) para ser este animal
   emoji: string;
   nombre: string;
   poema: string;
@@ -29,28 +32,28 @@ type Animal = {
 // Ordenados del grito más fuerte al más suave.
 const ANIMALES: Animal[] = [
   {
-    minDb: -6,
+    minDb: -3,
     emoji: "🦁",
     nombre: "un león",
     poema:
       "Tu grito no pidió permiso.\nSalió como sale el sol en la sabana:\nde golpe, entero, imposible de ignorar.\nSos león porque cuando hablás,\nel mundo se calla para escucharte.",
   },
   {
-    minDb: -12,
+    minDb: -8,
     emoji: "🐺",
     nombre: "un lobo",
     poema:
       "Tu voz tiene algo de luna llena.\nNo gritaste para asustar,\ngritaste para llamar a los tuyos.\nSos lobo porque tu fuerza no está en estar solo:\nestá en saber que alguien va a responder.",
   },
   {
-    minDb: -20,
+    minDb: -15,
     emoji: "🐦‍⬛",
     nombre: "un cuervo",
     poema:
       "No fue el grito más fuerte, pero fue el más tuyo.\nComo el cuervo, sabés que la voz\nno se mide en volumen sino en lo que deja dicho.\nSos cuervo porque mirás antes de hablar,\ny cuando hablás, se recuerda.",
   },
   {
-    minDb: -30,
+    minDb: -25,
     emoji: "🐈",
     nombre: "un gato",
     poema:
@@ -206,8 +209,9 @@ export default function App() {
       fadeAnim.setValue(1);
       setGrabando(true);
 
-      let ultimoVolumen = -160;
-      let umbralActual = -25;
+      let umbralActual = -18;
+      let muestrasSobreUmbral = 0;
+      const ventana: number[] = [];
       let tiempoUltimaFrase = 0;
       let tiempoTotal = 0;
 
@@ -232,17 +236,25 @@ export default function App() {
         if (!status || !status.isRecording) return;
 
         const vol = status.metering ?? -160;
-        const cambio = vol - ultimoVolumen;
 
-        gritoMaxRef.current = Math.max(gritoMaxRef.current, vol);
+        // El "grito" es el volumen más bajo de las últimas muestras:
+        // solo sube si se mantiene fuerte, no por un pico suelto.
+        ventana.push(vol);
+        if (ventana.length > MUESTRAS_SOSTENIDAS) ventana.shift();
+        if (ventana.length === MUESTRAS_SOSTENIDAS) {
+          gritoMaxRef.current = Math.max(gritoMaxRef.current, Math.min(...ventana));
+        }
 
         if (vol < -40) setColor("#888");
         else if (vol < -25) setColor("#ffffff");
         else if (vol < -15) setColor("#ffd54f");
         else setColor("#ff3b3b");
 
-        if (vol > umbralActual && cambio > 6) {
-          umbralActual = Math.min(umbralActual + 7, -5);
+        muestrasSobreUmbral = vol > umbralActual ? muestrasSobreUmbral + 1 : 0;
+
+        if (muestrasSobreUmbral >= MUESTRAS_SOSTENIDAS) {
+          umbralActual = Math.min(umbralActual + 5, -3);
+          muestrasSobreUmbral = 0;
           avanzar();
           tiempoUltimaFrase = 0;
         } else if (fraseIndexRef.current === FRASES.length - 1) {
@@ -250,7 +262,6 @@ export default function App() {
           if (tiempoUltimaFrase > 1500) terminar();
         }
 
-        ultimoVolumen = vol;
       }, INTERVALO);
     } finally {
       isStartingRef.current = false;
